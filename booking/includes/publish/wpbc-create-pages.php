@@ -108,6 +108,7 @@ function wpbc_is_shortcode_exist_in_page( $relative_url, $shortcode_to_add ) {
 	return false;
 }
 
+
 /**
  * Add shortcode, if it does not exist yet, to the page
  *
@@ -139,24 +140,164 @@ function wpbc_add_shortcode_to_exist_page( $relative_url, $shortcode_to_add ) {
 	return false;
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Create new page or add to existing page the shortcode
+ *
+ * @param array $params
+ *
+ * @return array                success: 	[ 'result' => true,  'relative_url' => $relative_post_url, 'message' => __( 'Booking form shortcode embedded into the page.', 'booking' ) ]
+ *                              failed: 	[ 'result' => false, 'message' => __( 'We can not embed booking form shortcode into the page.', 'booking' ) ]
+ *
+ *  Example:
+ *           $result_arr = wpbc_add_shortcode_into_page( array(
+ *                                                      'shortcode'  => '[booking resource_id=1]',
+ *                                                      'post_title' => 'Booking Form'
+ *                                              ) );
+ */
+function wpbc_add_shortcode_into_page( $params = array() ) {
+
+	$defaults = array(
+						'page_post_name'        => '',              // 'wpbc-booking',
+						'post_title'            => esc_html( __( 'Booking Form', 'booking' ) ),
+						'shortcode'             => '[booking resource_id=1]',
+						'check_exist_shortcode' => '[booking',                      // can be an array:  array( '[booking resource_id=1]', '[booking type=1]', '[booking]' )
+						'page_id'               => 0
+					);
+	$params   = wp_parse_args( $params, $defaults );
+
+	if ( empty( $params['page_post_name'] ) ) {
+		$params['page_post_name'] = sanitize_title( $params['post_title'] );        // Get slug for the page
+	}
+
+
+	global $wp_rewrite;
+	if ( is_null( $wp_rewrite ) ) {
+		return array( 'result' => false, 'message' => 'Sorry, we are unable to insert the shortcode into the page. The reason is that wp_rewrite is not initialized.' );
+	}
+	// -----------------------------------------------------------------------------------------------------------------
+
+	$params['page_id'] = intval( $params['page_id'] );
+	if ( ! empty( $params['page_id'] ) ) {
+		$wp_post = get_post( $params['page_id'] );
+	} else {
+		$wp_post = get_page_by_path( $params['page_post_name'] );
+	}
+
+	$relative_post_url = '';
+
+	$post_title = '';
+	$post_url   = '';
+	if ( ! empty( $wp_post ) ) {
+		$post_title = $wp_post->post_title;
+		$post_url = get_permalink( $wp_post->ID );
+	}
+
+	if ( empty( $wp_post ) ) {                                                                                          // No default page.  Create it.
+
+		$page_params = array(
+			'post_title'   => $params['post_title'],
+			'post_content' => $params['shortcode'],
+			'post_name'    => $params['page_post_name']
+		);
+		$post_id = wpbc_create_page( $page_params );
+
+		if ( ! empty( $post_id ) ) {
+
+			$new_post = get_post( $post_id );
+			if ( ! empty( $new_post ) ) {
+				$post_title = $new_post->post_title;
+				$post_url = get_permalink( $new_post->ID );
+			}
+
+			$relative_post_url = wpbc_make_link_relative( get_permalink(  $post_id ) );
+
+			return array( 'result'       => true,
+			              'relative_url' => $relative_post_url,
+			              'message'      => __( 'A new page has been created.', 'booking' ) . ' ' . sprintf( __( 'The booking form shortcode %s has been embedded into the page %s.', 'booking' )
+		                                    , "<strong>{$params['shortcode']}</strong>"
+							                , "<a href='" . esc_url( $post_url ) . "'>{$post_title}</a>"
+										)
+			);
+		}
+
+	} else {
+		$relative_post_url = wpbc_make_link_relative( get_permalink(  $wp_post->ID ) );                                          // Page already exist,  so we need to update the
+	}
+
+	// Check  if the shortcode in the page
+	$is_shortcode_already_in_page = false;
+	if ( is_array( $params['check_exist_shortcode'] ) ) {
+		foreach ( $params['check_exist_shortcode'] as $check_shortcode ) {
+			$is_shortcode_already_in_page = wpbc_is_shortcode_exist_in_page( $relative_post_url, $check_shortcode );
+			if ( $is_shortcode_already_in_page ) {
+				break;
+			}
+		}
+	} else {
+		$is_shortcode_already_in_page = wpbc_is_shortcode_exist_in_page( $relative_post_url, $params['check_exist_shortcode'] );
+	}
+
+	// Check  if existing page has our shortcode. We are checking for 'booking'  because it can  be '[booking]' or '[booking type=1]' ...
+	if (
+		   ( ! $is_shortcode_already_in_page )
+		&& ( ! wpbc_is_shortcode_exist_in_page( $relative_post_url, $params['shortcode'] ) )
+	) {
+		$is_sh_added = wpbc_add_shortcode_to_exist_page( $relative_post_url, $params['shortcode'] );
+
+		if ( $is_sh_added ) {
+			return array( 'result'       => true,
+			              'relative_url' => $relative_post_url,
+			              'message'      => sprintf( __( 'The booking form shortcode %s has been embedded into the page %s.', 'booking' )
+		                                    , "<strong>{$params['shortcode']}</strong>"
+							                , "<a href='" . esc_url( $post_url ) . "'>{$post_title}</a>"
+										)
+			);
+
+		} else {
+			return array( 'result'       => false,
+			              'message'      => sprintf( __( 'We are unable to embed the booking form shortcode %s into the page %s.', 'booking' )
+		                                    , "<strong>{$params['shortcode']}</strong>"
+							                , "<a href='" . esc_url( $post_url ) . "'>{$post_title}</a>"
+										)
+			);
+		}
+	} else {
+
+		return array( 'result'       => false,
+		              'message'      => sprintf( __( 'The Booking Calendar shortcode %s is already present on this page %s.', 'booking' )
+		                                    , "<strong>{$params['shortcode']}</strong>"
+							                , "<a href='" . esc_url( $post_url ) . "'>{$post_title}</a>"
+										)
+		);
+
+	}
+
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------------------------
 
 
 /**
  * Create new starter page with  booking form
  *
- * @param $default_options_to_add
+ * @param $default_options_to_add       - array from function wpbc_get_default_options(),  which  passed only  from 'wpbc_before_activation__add_options'. Here we skip  this option.
  *
  * @return void
  */
-function wpbc_create_page_with_booking_form( $default_options_to_add ) {                                                        //FixIn: 9.6.2.11
+function wpbc_create_page_with_booking_form( $default_options_to_add = array() ) {                                                        //FixIn: 9.6.2.11
 
 	global $wp_rewrite;
 	if ( is_null( $wp_rewrite ) ) {                                                                                     //FixIn: 9.7.1.1
 
 		// Maybe it was not init,  yet
-		if ( ! has_action( 'init', 'wpbc_create_page_thank_you' ) ) {
-			add_action( 'init', 'wpbc_create_page_thank_you', 99 );                                                     // <- priority  to  load it last
+		if ( ! has_action( 'init', 'wpbc_create_page_with_booking_form' ) ) {
+			add_action( 'init', 'wpbc_create_page_with_booking_form', 99 );                                             // <- priority  to  load it last
 		}
 		return false;
 	}
@@ -167,7 +308,7 @@ function wpbc_create_page_with_booking_form( $default_options_to_add ) {        
 
 	$post_url = '';
 
-	if ( empty( $wp_post ) ) {                                                                                      // No default page.  Create it.
+	if ( empty( $wp_post ) ) {                                                                                          // No default page.  Create it.
 
 		$page_params = array(
 			'post_title'   => esc_html( __( 'Booking Form', 'booking' ) ),
@@ -181,7 +322,7 @@ function wpbc_create_page_with_booking_form( $default_options_to_add ) {        
 		}
 
 	} else {
-		$post_url = wpbc_make_link_relative( get_permalink(  $wp_post->ID ) );                                      // Page already exist,  so we need to update the
+		$post_url = wpbc_make_link_relative( get_permalink(  $wp_post->ID ) );                                          // Page already exist,  so we need to update the
 	}
 
 	// -----------------------------------------------------------------------------------------------------------------
